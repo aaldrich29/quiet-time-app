@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f3ee">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="A simple, elegant timer for your quiet time.">
+  <title>Quiet Time</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f7f3ee;
+      --text: #5b4a3e;
+      --accent: #8b7355;
+      --card-bg: rgba(255,255,255,0.6);
+      --radius: 16px;
+      --transition-speed: 1.8s;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      min-height: 100dvh;
+      transition: background-color var(--transition-speed) ease, color var(--transition-speed) ease;
+      overflow-x: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .app {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 24px 20px;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ─── Setup View ─── */
+    #setup-view { flex: 1; display: flex; flex-direction: column; }
+
+    .header {
+      text-align: center;
+      padding: 20px 0 8px;
+    }
+    .header h1 { font-size: 1.6rem; font-weight: 600; letter-spacing: 0.02em; }
+    .header p { font-size: 0.85rem; opacity: 0.65; margin-top: 4px; }
+
+    /* ─── Add Item Form ─── */
+    .add-form {
+      display: flex;
+      gap: 8px;
+      margin: 20px 0;
+    }
+    .add-form input {
+      flex: 1;
+      padding: 12px 14px;
+      border: 1.5px solid rgba(0,0,0,0.08);
+      border-radius: var(--radius);
+      font-size: 0.95rem;
+      background: var(--card-bg);
+      backdrop-filter: blur(4px);
+      color: inherit;
+      outline: none;
+      transition: border-color 0.25s;
+    }
+    .add-form input:focus { border-color: var(--accent); }
+    .add-form input::placeholder { color: inherit; opacity: 0.4; }
+    .add-form .min-input { width: 80px; flex: 0 0 80px; text-align: center; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 12px 18px; border: none; border-radius: var(--radius);
+      font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: all 0.2s;
+      background: var(--accent); color: white; white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { transform: scale(0.96); opacity: 0.85; }
+    .btn-ghost {
+      background: transparent; color: inherit; opacity: 0.45;
+      padding: 8px; font-size: 1rem;
+    }
+    .btn-ghost:hover { opacity: 0.8; }
+
+    /* ─── Item List ─── */
+    .item-list {
+      flex: 1; list-style: none; display: flex; flex-direction: column;
+      gap: 8px; margin-bottom: 16px; overflow-y: auto; min-height: 60px;
+      position: relative;
+    }
+    .item-list:empty::after {
+      content: 'Add items above to begin'; display: block; text-align: center;
+      opacity: 0.35; font-size: 0.85rem; padding: 40px 0; font-style: italic;
+    }
+
+    .item-card {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px; background: var(--card-bg); backdrop-filter: blur(4px);
+      border-radius: var(--radius); border: 1px solid rgba(0,0,0,0.04);
+      transition: opacity 0.2s, box-shadow 0.2s;
+      animation: slideIn 0.3s ease;
+      touch-action: none;
+      position: relative;
+      z-index: 1;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .item-card.drag-origin {
+      opacity: 0.25;
+      transition: opacity 0.15s;
+    }
+
+    .item-card.drag-ghost {
+      position: fixed;
+      z-index: 1000;
+      pointer-events: none;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+      width: calc(min(480px, 100vw) - 40px);
+      transition: none;
+      opacity: 0.95;
+    }
+
+    .item-card.drag-target-above {
+      transform: translateY(calc(-100% - 8px));
+      transition: transform 0.2s ease;
+    }
+    .item-card.drag-target-below {
+      transform: translateY(calc(100% + 8px));
+      transition: transform 0.2s ease;
+    }
+
+    .drag-handle {
+      cursor: grab; opacity: 0.25; font-size: 1.1rem;
+      padding: 4px 2px; flex-shrink: 0; touch-action: none;
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .drag-handle.dragging { opacity: 0.5; }
+
+    .item-card .item-color { width: 5px; height: 32px; border-radius: 3px; flex-shrink: 0; }
+    .item-card .item-info { flex: 1; min-width: 0; }
+    .item-card .item-name { font-weight: 500; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-card .item-time { font-size: 0.8rem; opacity: 0.55; }
+    .item-card .item-actions { display: flex; gap: 2px; }
+
+    /* ─── Bottom Bar ─── */
+    .bottom-bar {
+      display: flex; gap: 10px; align-items: center;
+      padding: 12px 0 8px; border-top: 1px solid rgba(0,0,0,0.06);
+    }
+    .bottom-bar .total-time { font-size: 0.85rem; opacity: 0.55; flex: 1; }
+    .bottom-bar .btn-start { padding: 14px 32px; font-size: 1.05rem; border-radius: 24px; }
+
+    /* ─── Timer View ─── */
+    #timer-view {
+      display: none; flex: 1; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center;
+      padding: 40px 20px; min-height: 100vh; min-height: 100dvh; position: relative;
+    }
+    #timer-view.active { display: flex; }
+    #setup-view.hidden { display: none; }
+
+    .timer-item-name { font-size: 1.1rem; font-weight: 400; opacity: 0.7; margin-bottom: 8px; letter-spacing: 0.03em; }
+
+    .timer-display {
+      font-size: 5.5rem; font-weight: 300; line-height: 1.1;
+      letter-spacing: -0.02em; transition: font-size 0.4s; font-variant-numeric: tabular-nums;
+    }
+
+    .timer-status { margin-top: 24px; font-size: 0.85rem; opacity: 0.4; }
+
+    .timer-progress-dots { display: flex; gap: 8px; margin-top: 32px; align-items: center; }
+    .timer-progress-dots .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+      opacity: 0.15; transition: all 0.5s;
+    }
+    .timer-progress-dots .dot.active { opacity: 0.7; transform: scale(1.4); }
+    .timer-progress-dots .dot.done { opacity: 0.3; transform: scale(0.7); }
+
+    /* ─── Next Overlay ─── */
+    .next-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      z-index: 10;
+      animation: fadeIn 0.5s ease;
+      padding: 0 40px;
+    }
+    .next-overlay.active { display: flex; }
+    .next-overlay .done-label { font-size: 0.9rem; opacity: 0.4; letter-spacing: 0.06em; text-transform: uppercase; }
+    .next-overlay .finished-name { font-size: 1.4rem; font-weight: 400; text-align: center; }
+    .next-overlay .btn-next {
+      padding: 16px 48px; font-size: 1.1rem; border-radius: 28px;
+      letter-spacing: 0.02em; margin-top: 24px;
+    }
+    .next-overlay .btn-skip-overlay {
+      background: transparent; color: inherit; opacity: 0.4;
+      padding: 12px; font-size: 0.85rem; border-radius: 0;
+      letter-spacing: 0.04em;
+    }
+    .next-overlay .btn-skip-overlay:hover { opacity: 0.7; }
+
+    /* ─── Timer Controls ─── */
+    .timer-controls {
+      position: absolute;
+      bottom: 48px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      z-index: 5;
+    }
+    .timer-controls .btn-control {
+      padding: 10px 20px; border-radius: 20px;
+      background: var(--card-bg); backdrop-filter: blur(4px);
+      color: inherit; border: 1px solid rgba(0,0,0,0.08);
+      font-size: 0.85rem; letter-spacing: 0.03em;
+    }
+    .timer-controls .btn-control.btn-skip {
+      opacity: 0.55;
+    }
+    .timer-controls .play-pause-btn {
+      width: 56px; height: 56px; border-radius: 50%; padding: 0;
+      background: var(--accent); color: white; border: none;
+      font-size: 0; position: relative;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08); transition: all 0.25s;
+    }
+    .play-pause-btn:active { transform: scale(0.92); }
+    .play-pause-btn svg { position: absolute; inset: 0; margin: auto; }
+
+    /* ─── Completion View ─── */
+    .completion-view {
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; min-height: 60vh;
+    }
+    .completion-view.active { display: flex; }
+    .completion-view .check { font-size: 4rem; opacity: 0.6; }
+    .completion-view h2 { font-weight: 400; font-size: 1.5rem; }
+    .completion-view p { opacity: 0.5; font-size: 0.9rem; }
+    .completion-view .btn { margin-top: 16px; padding: 14px 40px; border-radius: 24px; }
+
+    /* ─── Modal ─── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.2); backdrop-filter: blur(6px);
+      z-index: 100; align-items: flex-end; justify-content: center;
+      animation: fadeIn 0.25s ease;
+    }
+    .modal-overlay.active { display: flex; }
+
+    .modal-sheet {
+      background: var(--bg); color: var(--text);
+      width: 100%; max-width: 480px; border-radius: 20px 20px 0 0;
+      padding: 28px 24px 40px; animation: slideUp 0.3s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+    .modal-sheet h2 { font-weight: 500; font-size: 1.2rem; margin-bottom: 20px; text-align: center; }
+    .modal-sheet .field { margin-bottom: 16px; }
+    .modal-sheet .field label {
+      display: block; font-size: 0.8rem; opacity: 0.55;
+      margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .modal-sheet .field input {
+      width: 100%; padding: 14px 16px; border: 1.5px solid rgba(0,0,0,0.08);
+      border-radius: 12px; font-size: 1rem; background: var(--card-bg);
+      backdrop-filter: blur(4px); color: inherit; outline: none; transition: border-color 0.25s;
+    }
+    .modal-sheet .field input:focus { border-color: var(--accent); }
+    .modal-sheet .modal-buttons { display: flex; gap: 10px; margin-top: 24px; }
+    .modal-sheet .modal-buttons .btn { flex: 1; padding: 14px; border-radius: 12px; }
+    .modal-sheet .modal-buttons .btn-cancel {
+      background: var(--card-bg); color: inherit;
+      backdrop-filter: blur(4px); border: 1.5px solid rgba(0,0,0,0.08);
+    }
+
+    /* ─── Utility ─── */
+    .fade-in { animation: fadeIn 0.6s ease; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 420px) {
+      .app { padding: 16px 14px; }
+      .timer-display { font-size: 4rem; }
+      .add-form .min-input { flex: 0 0 70px; }
+      .item-card.drag-ghost { width: calc(100vw - 28px); }
+    }
+    @media (min-width: 600px) {
+      .timer-display { font-size: 7rem; }
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+  <div class="app" role="main">
+
+    <!-- ═══ SETUP VIEW ═══ -->
+    <div id="setup-view">
+      <div class="header fade-in">
+        <h1>✧ Quiet Time</h1>
+        <p>Set your intentions</p>
+      </div>
+
+      <form class="add-form" id="add-form" autocomplete="off">
+        <input type="text" id="new-name" placeholder="Item name…" required>
+        <input type="number" class="min-input" id="new-minutes" placeholder="min" min="0.5" step="0.5" value="5" required>
+        <button type="submit" class="btn">Add</button>
+      </form>
+
+      <ul class="item-list" id="item-list"></ul>
+
+      <div class="bottom-bar">
+        <span class="total-time" id="total-time">0 min total</span>
+        <button class="btn btn-start" id="start-btn">Start Quiet Time →</button>
+      </div>
+    </div>
+
+    <!-- ═══ TIMER VIEW ═══ -->
+    <div id="timer-view">
+      <div class="timer-item-name" id="timer-name">Reading</div>
+      <div class="timer-display" id="timer-display">10</div>
+      <div class="timer-status" id="timer-status">Item 1 of 4</div>
+
+      <div class="timer-progress-dots" id="progress-dots"></div>
+
+      <!-- Next overlay — shown when time's up -->
+      <div class="next-overlay" id="next-overlay">
+        <div class="done-label">✦ Time's Up</div>
+        <div class="finished-name" id="finished-name">Reading</div>
+        <button class="btn btn-next" id="next-btn">Next →</button>
+        <!-- Extra faint "skip" for when you just want to move on from last item too -->
+      </div>
+
+      <div class="completion-view" id="completion-view">
+        <div class="check">✦</div>
+        <h2>Quiet Time Complete</h2>
+        <p id="completion-summary">All items finished</p>
+        <button class="btn" id="done-btn">Done</button>
+      </div>
+
+      <div class="timer-controls" id="timer-controls">
+        <button class="btn-control" id="stop-btn">Stop</button>
+        <button class="btn-control btn-skip" id="skip-btn">Skip</button>
+        <button class="play-pause-btn" id="pause-btn" aria-label="Pause">
+          <svg class="icon-pause" width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <rect x="4" y="3" width="5" height="16" rx="1.5" fill="currentColor"/>
+            <rect x="13" y="3" width="5" height="16" rx="1.5" fill="currentColor"/>
+          </svg>
+          <svg class="icon-play" width="22" height="22" viewBox="0 0 22 22" fill="none" style="display:none">
+            <path d="M5 3L19 11L5 19Z" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ EDIT MODAL ═══ -->
+  <div class="modal-overlay" id="edit-modal">
+    <div class="modal-sheet">
+      <h2>Edit Item</h2>
+      <div class="field">
+        <label for="edit-name">Name</label>
+        <input type="text" id="edit-name" placeholder="Item name">
+      </div>
+      <div class="field">
+        <label for="edit-minutes">Minutes</label>
+        <input type="number" id="edit-minutes" placeholder="Duration" min="0.5" step="0.5">
+      </div>
+      <div class="modal-buttons">
+        <button class="btn btn-cancel" id="modal-cancel">Cancel</button>
+        <button class="btn" id="modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ══════════════════════════════════════════════════════════
+       Quiet Time — Timer App v3
+       ══════════════════════════════════════════════════════════ */
+
+    const THEMES = [
+      { bg: '#f7f3ee', text: '#5b4a3e', accent: '#8b7355' },
+      { bg: '#eef3f7', text: '#3d5a6b', accent: '#5a7f91' },
+      { bg: '#f3eef7', text: '#55456b', accent: '#7d6391' },
+      { bg: '#eef7f1', text: '#3e6b4e', accent: '#5c8b6a' },
+      { bg: '#f7eeef', text: '#6b4545', accent: '#916363' },
+      { bg: '#f4f7ee', text: '#566b45', accent: '#7d8b63' },
+      { bg: '#f7f0ee', text: '#6b5545', accent: '#917a63' },
+      { bg: '#eef0f7', text: '#454e6b', accent: '#636f91' },
+    ];
+
+    // ─── State ───
+    let items = [];
+    let currentIndex = 0;
+    let timerRunning = false;
+    let timerPaused = false;
+    let awaitingNext = false;
+    let timeRemaining = 0;
+    let timerInterval = null;
+    let wakeLockObj = null;
+    let audioCtx = null;
+
+    // Drag state
+    let dragState = null;  // { element, index, ghost, startY, originRect }
+
+    // Edit modal state
+    let editingIndex = -1;
+
+    // ─── DOM Refs ───
+    const $ = id => document.getElementById(id);
+    const setupView = $('setup-view');
+    const timerView = $('timer-view');
+    const itemList = $('item-list');
+    const addForm = $('add-form');
+    const newName = $('new-name');
+    const newMinutes = $('new-minutes');
+    const totalTime = $('total-time');
+    const startBtn = $('start-btn');
+    const timerName = $('timer-name');
+    const timerDisplay = $('timer-display');
+    const timerStatus = $('timer-status');
+    const progressDots = $('progress-dots');
+    const pauseBtn = $('pause-btn');
+    const stopBtn = $('stop-btn');
+    const skipBtn = $('skip-btn');
+    const completionView = $('completion-view');
+    const completionSummary = $('completion-summary');
+    const timerControls = $('timer-controls');
+    const doneBtn = $('done-btn');
+    const nextOverlay = $('next-overlay');
+    const finishedName = $('finished-name');
+    const nextBtn = $('next-btn');
+    const editModal = $('edit-modal');
+    const editName = $('edit-name');
+    const editMinutes = $('edit-minutes');
+    const modalCancel = $('modal-cancel');
+    const modalSave = $('modal-save');
+    const iconPause = document.querySelector('.icon-pause');
+    const iconPlay = document.querySelector('.icon-play');
+
+    // ─── Audio Init ───
+    function ensureAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    }
+
+    // ─── Load / Save ───
+    function loadItems() {
+      try {
+        const saved = localStorage.getItem('quietTimeItems');
+        if (saved) items = JSON.parse(saved);
+      } catch (_) {}
+      if (!items.length) {
+        items = [
+          { name: 'Read Bible', minutes: 10 },
+          { name: 'Prayer', minutes: 5 },
+          { name: 'Meditate', minutes: 5 },
+          { name: 'Journal', minutes: 5 },
+        ];
+        saveItems();
+      }
+    }
+    function saveItems() { localStorage.setItem('quietTimeItems', JSON.stringify(items)); }
+
+    // ─── Render Setup ───
+    function renderSetup() {
+      itemList.innerHTML = '';
+      let total = 0;
+      items.forEach((item, i) => {
+        total += item.minutes;
+        const theme = THEMES[i % THEMES.length];
+        const card = document.createElement('li');
+        card.className = 'item-card';
+        card.dataset.index = i;
+        card.innerHTML = `
+          <div class="drag-handle" data-index="${i}">⠿</div>
+          <div class="item-color" style="background:${theme.accent}"></div>
+          <div class="item-info">
+            <div class="item-name">${esc(item.name)}</div>
+            <div class="item-time">${item.minutes} min</div>
+          </div>
+          <div class="item-actions">
+            <button class="btn btn-ghost" data-edit="${i}" title="Edit">✎</button>
+            <button class="btn btn-ghost" data-delete="${i}" title="Remove">✕</button>
+          </div>
+        `;
+        itemList.appendChild(card);
+      });
+      totalTime.textContent = `${total} min total`;
+
+      itemList.querySelectorAll('[data-delete]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.delete);
+          items.splice(idx, 1);
+          saveItems();
+          renderSetup();
+        });
+      });
+      itemList.querySelectorAll('[data-edit]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          openEditModal(parseInt(btn.dataset.edit));
+        });
+      });
+      // Attach drag handles
+      itemList.querySelectorAll('.drag-handle').forEach(h => {
+        h.addEventListener('mousedown', onDragStart);
+        h.addEventListener('touchstart', onDragStart, { passive: false });
+      });
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // ─── Add Item ───
+    addForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = newName.value.trim();
+      const mins = parseFloat(newMinutes.value);
+      if (!name || isNaN(mins) || mins <= 0) return;
+      items.push({ name, minutes: mins });
+      saveItems();
+      renderSetup();
+      newName.value = '';
+      newMinutes.value = '5';
+      newName.focus();
+    });
+
+    // ─── Drag to Reorder (visual) ───
+    function onDragStart(e) {
+      if (e.type === 'touchstart') e.preventDefault();
+      const handle = e.currentTarget;
+      const card = handle.closest('.item-card');
+      const idx = parseInt(card.dataset.index);
+      const rect = card.getBoundingClientRect();
+      const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+      const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+      const listRect = itemList.getBoundingClientRect();
+
+      // Mark origin as faded
+      card.classList.add('drag-origin');
+
+      // Create ghost: clone the card, position it fixed
+      const ghost = card.cloneNode(true);
+      ghost.classList.add('drag-ghost');
+      ghost.style.width = card.offsetWidth + 'px';
+      ghost.style.left = rect.left + 'px';
+      ghost.style.top = rect.top + 'px';
+      document.body.appendChild(ghost);
+
+      // Make handle look active
+      handle.classList.add('dragging');
+
+      const offsetY = clientY - rect.top;
+
+      dragState = {
+        element: card,
+        ghost,
+        handle,
+        index: idx,
+        originRect: rect,
+        offsetY,
+        listRect,
+        lastDropIndex: idx,
+      };
+
+      const onMove = (ev) => {
+        ev.preventDefault();
+        const cy = ev.clientY || (ev.touches && ev.touches[0].clientY);
+        if (cy == null) return;
+        dragMove(cy);
+      };
+
+      const onEnd = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onEnd);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onEnd);
+        dragEnd();
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onEnd);
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onEnd);
+    }
+
+    function dragMove(clientY) {
+      if (!dragState) return;
+      const { ghost, offsetY, listRect } = dragState;
+
+      // Move ghost to follow cursor
+      const ghostTop = clientY - offsetY;
+      ghost.style.top = ghostTop + 'px';
+
+      // Determine which index we're over
+      const cards = [...itemList.querySelectorAll('.item-card:not(.drag-origin)')];
+      let dropIndex = dragState.index;
+
+      for (let i = 0; i < cards.length; i++) {
+        const c = cards[i];
+        const idx = parseInt(c.dataset.index);
+        const cr = c.getBoundingClientRect();
+        const midY = cr.top + cr.height / 2;
+
+        if (clientY < midY) {
+          dropIndex = idx;
+          break;
+        }
+        dropIndex = idx + 1;
+      }
+
+      // Clamp
+      dropIndex = Math.max(0, Math.min(items.length - 1, dropIndex));
+      if (dropIndex === dragState.lastDropIndex) return;
+
+      dragState.lastDropIndex = dropIndex;
+
+      // Move origin card in DOM to the drop position visually
+      // We do this by marking which cards should shift
+      cards.forEach(c => {
+        c.classList.remove('drag-target-above', 'drag-target-below');
+      });
+
+      if (dropIndex < dragState.index) {
+        // Dragging up — shift cards between drop and origin down
+        cards.forEach(c => {
+          const idx = parseInt(c.dataset.index);
+          if (idx >= dropIndex && idx < dragState.index) {
+            c.classList.add('drag-target-below');
+          }
+        });
+      } else if (dropIndex > dragState.index) {
+        // Dragging down — shift cards between origin and drop up
+        cards.forEach(c => {
+          const idx = parseInt(c.dataset.index);
+          if (idx > dragState.index && idx <= dropIndex) {
+            c.classList.add('drag-target-above');
+          }
+        });
+      }
+    }
+
+    function dragEnd() {
+      if (!dragState) return;
+      const { ghost, index: srcIdx, lastDropIndex } = dragState;
+
+      // Remove ghost
+      if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+
+      // Clear all drag classes
+      document.querySelectorAll('.item-card').forEach(c => {
+        c.classList.remove('drag-origin', 'drag-target-above', 'drag-target-below');
+      });
+      document.querySelectorAll('.drag-handle.dragging').forEach(h => h.classList.remove('dragging'));
+
+      // Reorder if changed
+      if (lastDropIndex !== srcIdx) {
+        const [moved] = items.splice(srcIdx, 1);
+        items.splice(lastDropIndex, 0, moved);
+        saveItems();
+        renderSetup();
+      }
+
+      dragState = null;
+    }
+
+    // ─── Edit Modal ───
+    function openEditModal(idx) {
+      editingIndex = idx;
+      const item = items[idx];
+      editName.value = item.name;
+      editMinutes.value = item.minutes;
+      editModal.classList.add('active');
+      editName.focus();
+    }
+    function closeEditModal() { editModal.classList.remove('active'); editingIndex = -1; }
+    function saveEdit() {
+      const name = editName.value.trim();
+      const mins = parseFloat(editMinutes.value);
+      if (!name || isNaN(mins) || mins <= 0) return;
+      items[editingIndex] = { name, minutes: mins };
+      saveItems();
+      closeEditModal();
+      renderSetup();
+    }
+    modalCancel.addEventListener('click', closeEditModal);
+    modalSave.addEventListener('click', saveEdit);
+    editModal.addEventListener('click', (e) => { if (e.target === editModal) closeEditModal(); });
+    editName.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); editMinutes.focus(); } });
+    editMinutes.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveEdit(); } });
+
+    // ─── Start Timer ───
+    startBtn.addEventListener('click', () => {
+      if (items.length === 0) return;
+      ensureAudio();
+      startTimer();
+    });
+
+    function startTimer() {
+      if (items.length === 0) return;
+      currentIndex = 0;
+      completionView.classList.remove('active');
+      nextOverlay.classList.remove('active');
+      setupView.classList.add('hidden');
+      timerView.classList.add('active');
+      timerControls.style.display = '';
+      beginItem();
+      requestWakeLock();
+    }
+
+    function beginItem() {
+      if (currentIndex >= items.length) { completeTimer(); return; }
+
+      timerName.style.display = '';
+      timerDisplay.style.display = '';
+      progressDots.style.display = '';
+      timerStatus.style.display = '';
+      timerControls.style.display = '';
+      completionView.classList.remove('active');
+      nextOverlay.classList.remove('active');
+      awaitingNext = false;
+
+      const item = items[currentIndex];
+      timeRemaining = Math.round(item.minutes * 60);
+      timerRunning = true;
+      timerPaused = false;
+      updatePauseIcon(false);
+
+      applyTheme(currentIndex);
+      timerName.textContent = item.name;
+      timerStatus.textContent = `Item ${currentIndex + 1} of ${items.length}`;
+      updateDisplay();
+      renderDots();
+      clearInterval(timerInterval);
+      timerInterval = setInterval(tick, 1000);
+    }
+
+    function tick() {
+      if (timerPaused || awaitingNext) return;
+      if (timeRemaining <= 0) {
+        awaitingNext = true;
+        clearInterval(timerInterval);
+        playChime();
+        timerRunning = false;
+        timerName.style.display = 'none';
+        timerDisplay.style.display = 'none';
+        timerStatus.style.display = 'none';
+        const item = items[currentIndex];
+        finishedName.textContent = item.name;
+        nextBtn.textContent = (currentIndex === items.length - 1) ? 'Finish →' : 'Next →';
+        nextOverlay.classList.add('active');
+        return;
+      }
+      timeRemaining--;
+      updateDisplay();
+    }
+
+    // ─── Skip ───
+    skipBtn.addEventListener('click', skipItem);
+    function skipItem() {
+      if (!timerRunning && !awaitingNext) return;
+      // Release current timer
+      clearInterval(timerInterval);
+      playChime();
+      timerRunning = false;
+      nextOverlay.classList.remove('active');
+      // Advance
+      currentIndex++;
+      if (currentIndex < items.length) {
+        beginItem();
+        requestWakeLock();
+      } else {
+        completeTimer();
+      }
+    }
+
+    // ─── Next Button ───
+    nextBtn.addEventListener('click', () => {
+      currentIndex++;
+      beginItem();
+      requestWakeLock();
+    });
+
+    // ─── Update Display (minutes only, never seconds) ───
+    function updateDisplay() {
+      const mins = Math.ceil(timeRemaining / 60);
+      timerDisplay.textContent = Math.max(1, mins);
+    }
+
+    function renderDots() {
+      progressDots.innerHTML = '';
+      items.forEach((_, i) => {
+        const dot = document.createElement('div');
+        dot.className = 'dot';
+        if (i === currentIndex) dot.classList.add('active');
+        else if (i < currentIndex) dot.classList.add('done');
+        progressDots.appendChild(dot);
+      });
+    }
+
+    // ─── Theme ───
+    function applyTheme(index) {
+      const theme = THEMES[index % THEMES.length];
+      document.body.style.backgroundColor = theme.bg;
+      document.body.style.color = theme.text;
+      document.documentElement.style.setProperty('--accent', theme.accent);
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = theme.bg;
+    }
+    function resetColors() {
+      document.body.style.backgroundColor = '#f7f3ee';
+      document.body.style.color = '#5b4a3e';
+      document.documentElement.style.setProperty('--accent', '#8b7355');
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = '#f7f3ee';
+    }
+
+    // ─── Pause / Resume ───
+    pauseBtn.addEventListener('click', togglePause);
+    function togglePause() {
+      if (!timerRunning && !awaitingNext) return;
+      if (awaitingNext) return;
+      timerPaused = !timerPaused;
+      updatePauseIcon(timerPaused);
+      if (!timerPaused) requestWakeLock();
+    }
+    function updatePauseIcon(paused) {
+      iconPause.style.display = paused ? 'none' : '';
+      iconPlay.style.display = paused ? '' : 'none';
+    }
+
+    // ─── Stop ───
+    stopBtn.addEventListener('click', stopTimer);
+    function stopTimer() {
+      timerRunning = false; timerPaused = false; awaitingNext = false;
+      clearInterval(timerInterval);
+      releaseWakeLock();
+      timerView.classList.remove('active');
+      setupView.classList.remove('hidden');
+      completionView.classList.remove('active');
+      nextOverlay.classList.remove('active');
+      timerControls.style.display = '';
+      updatePauseIcon(false);
+      resetColors();
+    }
+    doneBtn.addEventListener('click', stopTimer);
+
+    // ─── Complete ───
+    function completeTimer() {
+      timerRunning = false;
+      clearInterval(timerInterval);
+      releaseWakeLock();
+      playCompletionChime();
+      timerName.style.display = 'none';
+      timerDisplay.style.display = 'none';
+      progressDots.style.display = 'none';
+      timerStatus.style.display = 'none';
+      timerControls.style.display = 'none';
+      nextOverlay.classList.remove('active');
+      completionView.classList.add('active');
+      const totalSec = items.reduce((s, i) => s + i.minutes * 60, 0);
+      const hrs = Math.floor(totalSec / 3600);
+      const mins = Math.floor((totalSec % 3600) / 60);
+      const duration = hrs > 0 ? `${hrs}h ${mins}m` : `${Math.round(totalSec / 60)} min`;
+      completionSummary.textContent = `${items.length} items · ${duration}`;
+    }
+
+    // ─── Wake Lock ───
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          if (wakeLockObj) { try { wakeLockObj.release(); } catch(_) {} wakeLockObj = null; }
+          wakeLockObj = await navigator.wakeLock.request('screen');
+          wakeLockObj.addEventListener('release', () => {
+            if (timerRunning && !timerPaused && !awaitingNext) requestWakeLock();
+          });
+        }
+      } catch (_) {}
+    }
+    function releaseWakeLock() {
+      if (wakeLockObj) { wakeLockObj.release().catch(() => {}); wakeLockObj = null; }
+    }
+
+    // ─── Audio ───
+    function playChime() {
+      try {
+        if (!audioCtx || audioCtx.state === 'closed') return;
+        const now = audioCtx.currentTime;
+        const o1 = audioCtx.createOscillator(); const g1 = audioCtx.createGain();
+        o1.connect(g1); g1.connect(audioCtx.destination);
+        o1.frequency.value = 523.25; o1.type = 'sine';
+        g1.gain.setValueAtTime(0.25, now); g1.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+        o1.start(now); o1.stop(now + 0.8);
+        const o2 = audioCtx.createOscillator(); const g2 = audioCtx.createGain();
+        o2.connect(g2); g2.connect(audioCtx.destination);
+        o2.frequency.value = 659.25; o2.type = 'sine';
+        g2.gain.setValueAtTime(0.2, now + 0.15); g2.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
+        o2.start(now + 0.15); o2.stop(now + 1.0);
+      } catch (_) {}
+    }
+    function playCompletionChime() {
+      try {
+        if (!audioCtx || audioCtx.state === 'closed') return;
+        const now = audioCtx.currentTime;
+        [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => {
+          const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+          o.connect(g); g.connect(audioCtx.destination);
+          o.frequency.value = f; o.type = 'sine';
+          const t = now + i * 0.2;
+          g.gain.setValueAtTime(0.2, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+          o.start(t); o.stop(t + 0.6);
+        });
+      } catch (_) {}
+    }
+
+    // ─── Keyboard ───
+    document.addEventListener('keydown', (e) => {
+      if (e.key === ' ' && timerView.classList.contains('active')) { e.preventDefault(); togglePause(); }
+      if (e.key === 'Escape' && timerView.classList.contains('active')) { stopTimer(); }
+      if (e.key === 'Enter' && nextOverlay.classList.contains('active')) { nextBtn.click(); }
+    });
+
+    // ─── Service Worker ───
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+
+    // ─── Init ───
+    loadItems();
+    renderSetup();
+  </script>
+</body>
+</html>

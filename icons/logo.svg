@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f3ee"/>
+      <stop offset="100%" stop-color="#ede6db"/>
+    </linearGradient>
+    <radialGradient id="ripple1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8b7355" stop-opacity="0"/>
+      <stop offset="85%" stop-color="#8b7355" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#8b7355" stop-opacity="0.12"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
+
+  <!-- Outer ripple -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#8b7355" stroke-opacity="0.1" stroke-width="2"/>
+  <circle cx="256" cy="256" r="160" fill="none" stroke="#8b7355" stroke-opacity="0.15" stroke-width="1.5"/>
+  <circle cx="256" cy="256" r="120" fill="none" stroke="#8b7355" stroke-opacity="0.2" stroke-width="1.5"/>
+  <circle cx="256" cy="256" r="80" fill="none" stroke="#8b7355" stroke-opacity="0.08" stroke-width="2"/>
+
+  <!-- Center diamond/star shape -->
+  <g transform="translate(256, 240)">
+    <!-- Four-pointed star using two overlapping elongated diamonds -->
+    <path d="M0 -80 L18 -20 L0 0 L-18 -20 Z" fill="#8b7355" opacity="0.9"/>
+    <path d="M0 80 L18 20 L0 0 L-18 20 Z" fill="#8b7355" opacity="0.9"/>
+    <path d="M-80 0 L-20 -18 L0 0 L-20 18 Z" fill="#8b7355" opacity="0.7"/>
+    <path d="M80 0 L20 -18 L0 0 L20 18 Z" fill="#8b7355" opacity="0.7"/>
+
+    <!-- Center dot -->
+    <circle cx="0" cy="0" r="8" fill="#8b7355" opacity="0.5"/>
+  </g>
+</svg>
