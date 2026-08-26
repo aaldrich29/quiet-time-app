@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # Gradle 8.2.1 / AGP 8.2.1 do not support JDK 21 — 8.5 was the first to.
@@ -37,29 +37,39 @@ jobs:
           npm run build
           npx cap sync android
 
+      # Without the secret we still build, just unsigned. That keeps the whole
+      # toolchain exercised on every push; only the install-on-phone step needs a key.
       - name: Decode signing keystore
+        id: keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set — cannot sign the APK."
-            exit 1
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set — building an UNSIGNED APK, which Android will refuse to install. Add the secret to get an installable build."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/quiet-time.jks"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/quiet-time.jks"
 
-      - name: Build signed release APK
+      - name: Build release APK
         working-directory: android
         env:
+          SIGNED: ${{ steps.keystore.outputs.signed }}
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          ./gradlew assembleRelease --no-daemon \
-            -PQT_KEYSTORE_FILE="$RUNNER_TEMP/quiet-time.jks" \
-            -PQT_KEYSTORE_PASSWORD="$STORE_PASSWORD" \
-            -PQT_KEY_ALIAS=quiet-time \
-            -PQT_KEY_PASSWORD="$KEY_PASSWORD"
+          ARGS=()
+          if [ "$SIGNED" = "true" ]; then
+            ARGS+=("-PQT_KEYSTORE_FILE=$RUNNER_TEMP/quiet-time.jks")
+            ARGS+=("-PQT_KEYSTORE_PASSWORD=$STORE_PASSWORD")
+            ARGS+=("-PQT_KEY_ALIAS=quiet-time")
+            ARGS+=("-PQT_KEY_PASSWORD=$KEY_PASSWORD")
+          fi
+          ./gradlew assembleRelease --no-daemon "${ARGS[@]}"
 
       - name: Confirm the APK is actually signed
+        if: steps.keystore.outputs.signed == 'true'
         run: |
           APK=android/app/build/outputs/apk/release/app-release.apk
           ls -lh "$APK"
@@ -71,7 +81,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: quiet-time-${{ github.sha }}
-          path: android/app/build/outputs/apk/release/app-release.apk
+          name: quiet-time-${{ steps.keystore.outputs.signed == 'true' && 'signed' || 'UNSIGNED' }}-${{ github.sha }}
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 90
