@@ -439,8 +439,6 @@
     // Background-safe timing / alerting
     let deadline = 0;          // epoch ms when the current item ends
     let alertSeq = 0;          // id of the alert currently scheduled in the SW
-    let keepAliveEl = null;    // near-silent looping audio, keeps us alive in the background
-    let keepAliveUrl = null;
     let restoring = false;
 
     // Drag state
@@ -490,63 +488,6 @@
       if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     }
 
-    // ─── Background keep-alive ───
-    // Browsers freeze timers in backgrounded tabs, but they leave pages that are
-    // playing media alone. A looping tone far below the hearing threshold keeps the
-    // countdown ticking (and the chime audible) while you're in another app.
-    function silentLoopUrl() {
-      if (keepAliveUrl) return keepAliveUrl;
-      const rate = 8000, frames = rate * 2;           // 2s of 220Hz = 440 whole cycles, loops seamlessly
-      const buf = new ArrayBuffer(44 + frames * 2);
-      const view = new DataView(buf);
-      const str = (off, t) => { for (let i = 0; i < t.length; i++) view.setUint8(off + i, t.charCodeAt(i)); };
-      str(0, 'RIFF'); view.setUint32(4, 36 + frames * 2, true); str(8, 'WAVE');
-      str(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
-      view.setUint16(22, 1, true); view.setUint32(24, rate, true);
-      view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-      str(36, 'data'); view.setUint32(40, frames * 2, true);
-      for (let i = 0; i < frames; i++) {
-        view.setInt16(44 + i * 2, Math.sin(2 * Math.PI * 220 * i / rate) * 0.0045 * 32767, true);
-      }
-      keepAliveUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-      return keepAliveUrl;
-    }
-    function startKeepAlive() {
-      try {
-        if (!keepAliveEl) {
-          keepAliveEl = new Audio(silentLoopUrl());
-          keepAliveEl.loop = true;
-          keepAliveEl.volume = 1;
-        }
-        const p = keepAliveEl.play();
-        if (p && p.catch) p.catch(() => {});
-      } catch (_) {}
-    }
-    function stopKeepAlive() {
-      try { if (keepAliveEl) keepAliveEl.pause(); } catch (_) {}
-      if ('mediaSession' in navigator) {
-        try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
-      }
-    }
-    // The keep-alive counts as media playback, so Android shows a notification-shade
-    // control for it — make it say something useful and wire it to pause/resume.
-    function updateMediaSession() {
-      if (!('mediaSession' in navigator)) return;
-      try {
-        const item = items[currentIndex];
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: awaitingNext ? "Time's up" : (item ? item.name : 'Quiet Time'),
-          artist: awaitingNext ? 'Tap to continue' : `Item ${currentIndex + 1} of ${items.length}`,
-          album: 'Quiet Time',
-          artwork: [{ src: './icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
-        });
-        navigator.mediaSession.playbackState = timerPaused ? 'paused' : 'playing';
-        navigator.mediaSession.setActionHandler('play', () => { if (timerPaused) togglePause(); });
-        navigator.mediaSession.setActionHandler('pause', () => { if (!timerPaused) togglePause(); });
-        navigator.mediaSession.setActionHandler('stop', () => stopTimer());
-      } catch (_) {}
-    }
-
     // ─── Notifications ───
     function notifySupported() { return 'Notification' in window; }
     function refreshNotifyUI() {
@@ -558,7 +499,7 @@
       }
       const perm = Notification.permission;
       notifyRow.classList.toggle('granted', perm === 'granted');
-      if (perm === 'granted') notifyHint.textContent = 'Alerts on \u2014 you\u2019ll be notified even in another app.';
+      if (perm === 'granted') notifyHint.textContent = 'Alerts on \u2014 you\u2019ll be notified when each item ends.';
       else if (perm === 'denied') notifyHint.textContent = 'Alerts blocked \u2014 enable notifications for this site in your browser settings.';
       else notifyHint.textContent = 'Get notified when each item ends, even if you switch apps.';
     }
@@ -645,11 +586,9 @@
       } else {
         deadline = saved.deadline;
         scheduleAlert(deadline);
-        startKeepAlive();
         tick();
       }
       restoring = false;
-      updateMediaSession();
       return true;
     }
 
@@ -905,6 +844,7 @@
     startBtn.addEventListener('click', () => {
       if (items.length === 0) return;
       ensureAudio();
+      askNotifyPermission();
       startTimer();
     });
 
@@ -948,8 +888,6 @@
       timerInterval = setInterval(tick, 1000);
       if (!restoring) {
         scheduleAlert(deadline);
-        startKeepAlive();
-        updateMediaSession();
         saveSession();
       }
     }
@@ -973,7 +911,8 @@
       const last = currentIndex === items.length - 1;
       if (!(opts && opts.silent)) {
         playChime();
-        showNotify(
+        // No point notifying someone who is already looking at the overlay.
+        if (document.visibilityState !== 'visible') showNotify(
           last ? 'Quiet Time complete' : `${item.name} — time's up`,
           last ? 'Your session is finished.' : 'Tap to start the next item.',
           'quiet-time-alert'
@@ -985,7 +924,6 @@
       finishedName.textContent = item.name;
       nextBtn.textContent = last ? 'Finish →' : 'Next →';
       nextOverlay.classList.add('active');
-      updateMediaSession();
       saveSession();
     }
 
@@ -1065,10 +1003,8 @@
       } else {
         deadline = Date.now() + timeRemaining * 1000;
         scheduleAlert(deadline);
-        startKeepAlive();
         requestWakeLock();
       }
-      updateMediaSession();
       saveSession();
     }
     function updatePauseIcon(paused) {
@@ -1083,7 +1019,6 @@
       clearInterval(timerInterval);
       cancelAlert();
       clearSession();
-      stopKeepAlive();
       releaseWakeLock();
       timerView.classList.remove('active');
       setupView.classList.remove('hidden');
@@ -1102,7 +1037,6 @@
       clearInterval(timerInterval);
       cancelAlert();
       clearSession();
-      stopKeepAlive();
       releaseWakeLock();
       playCompletionChime();
       timerName.style.display = 'none';
@@ -1183,7 +1117,6 @@
       if (timerRunning && !timerPaused && !awaitingNext) {
         tick();
         requestWakeLock();
-        startKeepAlive();
       }
     }
     document.addEventListener('visibilitychange', resync);
