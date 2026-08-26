@@ -73,7 +73,11 @@ jobs:
         run: |
           APK=android/app/build/outputs/apk/release/app-release.apk
           ls -lh "$APK"
-          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$APK"
+          # Runners carry several build-tools versions, so pick the newest
+          # explicitly — a bare glob expands to every one of them.
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          echo "Using $APKSIGNER"
+          "$APKSIGNER" verify --print-certs "$APK"
 
       - name: Remove keystore from the runner
         if: always()
