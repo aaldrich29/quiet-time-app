@@ -1,1 +1,15 @@
 .claude/
+
+# Signing keys — never commit
+.keys/
+*.jks
+*.keystore
+
+# Capacitor / node
+node_modules/
+www/
+.gradle/
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties

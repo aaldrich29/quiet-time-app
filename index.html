@@ -488,30 +488,96 @@
       if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     }
 
+    // ─── Native bridge ───
+    // In the Android build the alert is a real OS alarm: it fires at the right second
+    // whether or not the app is running. On the web we fall back to the service worker,
+    // which is best-effort. Everything below picks a path off this.
+    const native = {
+      get on() {
+        try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+        catch (_) { return false; }
+      },
+      get ln() {
+        try { return (window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) || null; }
+        catch (_) { return null; }
+      },
+    };
+    const NATIVE_ALERT_ID = 1;
+    const CHANNEL_ID = 'quiet-time-alerts';
+    let channelReady = false;
+
+    async function ensureChannel() {
+      const ln = native.ln;
+      if (channelReady || !native.on || !ln || !ln.createChannel) return;
+      try {
+        await ln.createChannel({
+          id: CHANNEL_ID,
+          name: 'Timer alerts',
+          description: "Fires when an item's time is up",
+          importance: 5,          // IMPORTANCE_HIGH — heads-up, so you actually see it
+          visibility: 1,
+          vibration: true,
+        });
+        channelReady = true;
+      } catch (_) {}
+    }
+
     // ─── Notifications ───
-    function notifySupported() { return 'Notification' in window; }
+    let notifyState = 'default';   // 'default' | 'granted' | 'denied' | 'unsupported'
+
+    async function readNotifyState() {
+      const ln = native.ln;
+      if (native.on && ln) {
+        try {
+          const res = await ln.checkPermissions();
+          notifyState = res.display === 'granted' ? 'granted'
+                      : res.display === 'denied' ? 'denied' : 'default';
+        } catch (_) { notifyState = 'default'; }
+      } else if ('Notification' in window) {
+        notifyState = Notification.permission;
+      } else {
+        notifyState = 'unsupported';
+      }
+      refreshNotifyUI();
+    }
+
     function refreshNotifyUI() {
-      if (!notifySupported()) {
+      if (notifyState === 'unsupported') {
         notifyRow.classList.remove('granted');
         notifyBtn.style.display = 'none';
         notifyHint.textContent = 'This browser can\u2019t send alerts \u2014 keep the app open.';
         return;
       }
-      const perm = Notification.permission;
-      notifyRow.classList.toggle('granted', perm === 'granted');
-      if (perm === 'granted') notifyHint.textContent = 'Alerts on \u2014 you\u2019ll be notified when each item ends.';
-      else if (perm === 'denied') notifyHint.textContent = 'Alerts blocked \u2014 enable notifications for this site in your browser settings.';
-      else notifyHint.textContent = 'Get notified when each item ends, even if you switch apps.';
+      notifyRow.classList.toggle('granted', notifyState === 'granted');
+      if (notifyState === 'granted') {
+        notifyHint.textContent = native.on
+          ? 'Alerts on \u2014 the timer will wake you even if the app is closed.'
+          : 'Alerts on \u2014 you\u2019ll be notified when each item ends.';
+      } else if (notifyState === 'denied') {
+        notifyHint.textContent = 'Alerts blocked \u2014 enable notifications for Quiet Time in your system settings.';
+      } else {
+        notifyHint.textContent = 'Get notified when each item ends, even if you switch apps.';
+      }
     }
+
     async function askNotifyPermission() {
-      if (!notifySupported() || Notification.permission !== 'default') { refreshNotifyUI(); return; }
-      try { await Notification.requestPermission(); } catch (_) {}
-      refreshNotifyUI();
+      if (notifyState !== 'default') { refreshNotifyUI(); return; }
+      const ln = native.ln;
+      if (native.on && ln) {
+        try { await ln.requestPermissions(); } catch (_) {}
+        await ensureChannel();
+      } else if ('Notification' in window) {
+        try { await Notification.requestPermission(); } catch (_) {}
+      }
+      await readNotifyState();
     }
     notifyBtn.addEventListener('click', askNotifyPermission);
 
+    // Fired by the page itself, for the web build only — on native the scheduled
+    // OS alarm has already done it, and firing here too would double up.
     async function showNotify(title, body, tag) {
-      if (!notifySupported() || Notification.permission !== 'granted') return;
+      if (native.on) return;
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
       const opts = {
         body, tag, renotify: true,
         icon: './icons/icon-192.png',
@@ -526,8 +592,7 @@
       try { new Notification(title, opts); } catch (_) {}
     }
 
-    // Belt and braces: hand the deadline to the service worker too, so the alert still
-    // fires if this page gets frozen outright. Same tag, so it never double-notifies.
+    // ─── Scheduling the alert ───
     function swPost(msg) {
       try {
         if (navigator.serviceWorker && navigator.serviceWorker.controller) {
@@ -535,21 +600,53 @@
         }
       } catch (_) {}
     }
-    function scheduleAlert(at) {
+
+    function alertText() {
       const item = items[currentIndex];
-      if (!item) return;
       const last = currentIndex === items.length - 1;
-      alertSeq++;
-      swPost({
-        type: 'schedule-alert',
-        id: alertSeq,
-        at,
+      return {
         title: last ? 'Quiet Time complete' : `${item.name} \u2014 time's up`,
         body: last ? 'Your session is finished.' : 'Tap to start the next item.',
-        tag: 'quiet-time-alert',
-      });
+      };
     }
+
+    async function scheduleNativeAlert(at, title, body) {
+      const ln = native.ln;
+      if (!ln) return;
+      try {
+        await ensureChannel();
+        await ln.cancel({ notifications: [{ id: NATIVE_ALERT_ID }] });
+        await ln.schedule({
+          notifications: [{
+            id: NATIVE_ALERT_ID,
+            title, body,
+            channelId: CHANNEL_ID,
+            // allowWhileIdle punches through Doze, which is the whole point.
+            schedule: { at: new Date(at), allowWhileIdle: true },
+          }],
+        });
+      } catch (_) {}
+    }
+
+    function scheduleAlert(at) {
+      if (!items[currentIndex]) return;
+      const { title, body } = alertText();
+      alertSeq++;
+      if (native.on) { scheduleNativeAlert(at, title, body); return; }
+      swPost({ type: 'schedule-alert', id: alertSeq, at, title, body, tag: 'quiet-time-alert' });
+    }
+
     function cancelAlert() {
+      const ln = native.ln;
+      if (native.on && ln) {
+        try {
+          ln.cancel({ notifications: [{ id: NATIVE_ALERT_ID }] }).catch(() => {});
+          if (ln.removeDeliveredNotifications) {
+            ln.removeDeliveredNotifications({ notifications: [{ id: NATIVE_ALERT_ID }] }).catch(() => {});
+          }
+        } catch (_) {}
+        return;
+      }
       swPost({ type: 'cancel-alert', id: alertSeq });
     }
 
@@ -1125,7 +1222,9 @@
     window.addEventListener('pagehide', saveSession);
 
     // ─── Service Worker ───
-    if ('serviceWorker' in navigator) {
+    // Web only. The native build ships no service worker: it has OS alarms for
+    // alerting and the APK for offline, so a second cache layer is just confusion.
+    if ('serviceWorker' in navigator && !native.on) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
       navigator.serviceWorker.addEventListener('message', (e) => {
         // The SW fired the alert while we were frozen — fold that back into the UI.
@@ -1138,7 +1237,7 @@
     // ─── Init ───
     loadItems();
     renderSetup();
-    refreshNotifyUI();
+    readNotifyState();
     restoreSession();
   </script>
 </body>

@@ -63,20 +63,60 @@ timer dead. Three things keep this one honest, without any server or background 
 3. **Session persistence** — the running session is saved to `localStorage`, so if the
    OS kills the app entirely, reopening it within six hours restores your place.
 
-### Known limitation
+### Known limitation (web only)
 
 The web has no way to schedule a local notification for a future time without a server.
 Notification Triggers (`TimestampTrigger`) never shipped, and Web Push requires a backend
 to send the message. So if Android freezes the app outright, the alert lands when the
-system next lets the app run rather than exactly on time.
+system next lets the app run rather than exactly on time. Installing as a PWA and marking
+it battery-unrestricted shrinks that window a lot.
 
-In practice this mostly matters for long items with the screen off. To make it reliable:
+**The Android build has no such limitation** — see below.
 
-- **Install it as a PWA** rather than using a browser tab — installed apps are frozen
-  far less aggressively.
-- **Exempt it from battery optimization** (Android: Settings → Apps → Quiet Time →
-  Battery → Unrestricted).
-- Leaving the screen on keeps it exact — the app holds a wake lock while a timer runs.
+## Android App
+
+The Android build wraps the same `index.html` in [Capacitor](https://capacitorjs.com) and
+swaps the notification layer for a real OS alarm (`@capacitor/local-notifications`,
+scheduled with `allowWhileIdle` so it punches through Doze). The alert fires at the right
+second whether or not the app is running — even if Android has killed it entirely. The
+app declares `USE_EXACT_ALARM`, which is granted at install time for alarm and timer apps.
+
+The web and native paths live side by side in `index.html` and are chosen at runtime via
+`Capacitor.isNativePlatform()`; the service worker is only registered on the web.
+
+### Getting the APK
+
+A GitHub Actions workflow builds and signs it on every push. Go to the **Actions** tab →
+latest **Build Android APK** run → download the artifact → open the APK on your phone and
+tap to install (you'll need to allow "install unknown apps" for your browser or file
+manager the first time).
+
+Three repository secrets are required (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | the keystore file, base64-encoded |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+The key alias is `quiet-time`. **Keep the keystore backed up** — Android refuses to install
+an update signed with a different key, and uninstalling to switch keys wipes your saved
+items.
+
+### Building locally
+
+Requires the Android SDK and JDK 17 (Gradle 8.2.1 does not support JDK 21):
+
+```bash
+npm install
+npm run sync                 # copies web assets into www/ and syncs the native project
+cd android && ./gradlew assembleRelease \
+  -PQT_KEYSTORE_FILE=/path/to/quiet-time-release.jks \
+  -PQT_KEYSTORE_PASSWORD=... -PQT_KEY_ALIAS=quiet-time -PQT_KEY_PASSWORD=...
+```
+
+Omit the `-P` flags for an unsigned build. The APK lands in
+`android/app/build/outputs/apk/release/`.
 
 ## Project Structure
 
@@ -84,7 +124,11 @@ In practice this mostly matters for long items with the screen off. To make it r
 quiet-time-app/
 ├── index.html        # App shell + all JS/CSS (single file)
 ├── manifest.json     # PWA manifest
-├── sw.js             # Service worker (offline + caching)
+├── sw.js             # Service worker (offline + web alerting)
+├── capacitor.config.json
+├── scripts/
+│   └── build-www.mjs # Copies static assets into www/ for the APK
+├── android/          # Capacitor Android project
 ├── favicon.png
 └── icons/
     ├── icon-192.png

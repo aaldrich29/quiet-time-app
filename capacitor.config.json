@@ -1,0 +1,14 @@
+{
+  "appId": "com.aaldrich.quiettime",
+  "appName": "Quiet Time",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#f7f3ee"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon",
+      "iconColor": "#8b7355"
+    }
+  }
+}
